@@ -176,7 +176,7 @@ app.get('/callback', (req, res) => {
   })
 
 
-const server = app.listen(80, () => console.log(`Aux Battle Backend listening on port ${APPLICATION_PORT}`));
+const server = app.listen(APPLICATION_PORT, () => console.log(`Aux Battle Backend listening on port ${APPLICATION_PORT}`));
 const io = new Socket(server, {
     handlePreflightRequest: (req, res) => {
         const headers = {
