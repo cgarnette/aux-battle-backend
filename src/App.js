@@ -1,4 +1,11 @@
-import { APPLICATION_PORT, SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URL } from './util/constants.js';
+import { 
+    APPLICATION_PORT, 
+    SPOTIFY_CLIENT_ID, 
+    SPOTIFY_CLIENT_SECRET, 
+    SPOTIFY_REDIRECT_URL, 
+    AUX_BATTLE_CLIENT_URL 
+} from './util/constants.js';
+
 import Socket from 'socket.io';
 import express from 'express';
 import cors from 'cors';
@@ -64,7 +71,7 @@ app.get('/spotify/search', async (req, res) => {
 
 app.get('/spotify_login', (req, res) => {
     const scope = 'user-read-private user-read-email streaming user-read-birthdate user-read-email user-read-private';
-    const redirect_uri = SPOTIFY_REDIRECT_URL
+    const redirect_uri = req.query.redirectURI ? AUX_BATTLE_CLIENT_URL + req.query.redirectURI : SPOTIFY_REDIRECT_URL;
 
 
     const newLocation = 'https://accounts.spotify.com/authorize' +
@@ -72,7 +79,7 @@ app.get('/spotify_login', (req, res) => {
     '&client_id=' + SPOTIFY_CLIENT_ID +
     (scope ? '&scope=' + encodeURIComponent(scope) : '') +
     '&redirect_uri=' + encodeURIComponent(redirect_uri);
-    console.log(newLocation)
+
     res.setHeader('Access-Control-Allow-Origin', '*');
 
     res.redirect('https://accounts.spotify.com/authorize' +
@@ -83,7 +90,7 @@ app.get('/spotify_login', (req, res) => {
 });
 
 app.get('/callback', (req, res) => {
-    const redirect_uri = SPOTIFY_REDIRECT_URL
+    const redirect_uri = req.query.redirectURI ? `${AUX_BATTLE_CLIENT_URL}${req.query.redirectURI}` : SPOTIFY_REDIRECT_URL;
     // your application requests refresh and access tokens
     // after checking the state parameter
   
@@ -103,6 +110,7 @@ app.get('/callback', (req, res) => {
     };
   
     request.post(authOptions, function(error, response, body) {
+        console.log("error", error);
         if (!error && response.statusCode === 200) {
             const access_token = body.access_token,
                 refresh_token = body.refresh_token;
@@ -154,7 +162,6 @@ app.get('/callback', (req, res) => {
     const keeperId = req.query.keeperId;
 
     const room = currentGame.getRoomById(roomCode);
-
     const player = room.getPlayerById(keeperId);
 
     player.roundScore += 5;
@@ -164,6 +171,15 @@ app.get('/callback', (req, res) => {
     res.status(200).json({success: "vote successful"});
   });
 
+  app.get('/category/submit', (req, res) => {
+      const roomCode = req.query.roomCode;
+      const category = req.query.category;
+
+      const room = currentGame.getRoomById(roomCode);
+
+      
+  });
+
   app.post('/settings', (req, res) => {
     const {roomCode, settings} = req.body;
 
@@ -171,12 +187,54 @@ app.get('/callback', (req, res) => {
 
     if (settings.categories) {
         room.setCategories(settings.categories);
+        if (settings.playDuration) {
+            room.setPlayDuration(settings.playDuration);
+        }
         res.status(200).json({success: "update successful"})
     }
-  })
+  });
 
+  //////// Party Room Mode ///////////////
+  app.get('/start/party', (req, res) => {
+    const access = req.query.access_token;
+    const refresh = req.query.refresh_token;
 
-const server = app.listen(APPLICATION_PORT, () => console.log(`Aux Battle Backend listening on port ${APPLICATION_PORT}`));
+    if (access && refresh) {
+        const newRoomId = currentGame.initializePartyRoom(access, refresh);
+        console.log("successfully created game");
+        res.status(200).json({roomCode: newRoomId});
+    } else {
+        res.status(500).json({error: "Tokens were not supplied"});
+    }
+});
+
+// app.post('/party/next', (req, res) => {
+//     const { roomCode, id } = req.body;
+//     const room = currentGame.getRoomById(roomCode);
+    
+//     if (room.getMonitor().id === id) {
+//         console.log("theyre asking for tracks");
+//         room.setHostWaiting();
+//     }
+    
+
+    
+// });
+
+app.post('/party/add', (req, res) => {
+    const { roomCode, track } = req.body;
+    const room = currentGame.getRoomById(roomCode);
+
+    try {
+        room.addTrack(track);
+        res.status(200).json({success: "track added successfully"});
+    } catch (error) {
+        res.status(500).json({error: "unable to add track"});
+    }
+});
+/////////////////////////////////////////////
+
+const server = app.listen(80, () => console.log(`Aux Battle Backend listening on port ${APPLICATION_PORT}`));
 const io = new Socket(server, {
     handlePreflightRequest: (req, res) => {
         const headers = {
@@ -188,13 +246,5 @@ const io = new Socket(server, {
         res.end();
     }
 });
-
-// io.origins((origin, callback) => {
-//     if (origin !== 'https://www.theauxbattle.com') {
-//         console.log("origin", origin);
-//         return callback('origin not allowed', false);
-//     }
-//     callback(null, true);
-//   });
 
 const communicationManager = new SocketManager(io, currentGame);

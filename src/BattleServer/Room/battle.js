@@ -1,66 +1,28 @@
-import { SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET } from '../util/constants.js';
-import { loadCategoryDefaults } from '../util/helpers';
-import request from 'request';
-import {Player} from './Player';
+import { loadCategoryDefaults } from '../../util/helpers';
+import {Player} from '../Player';
 import * as _ from "lodash";
+import Room from './';
+
+import { GAME_TYPE, PHASE } from '../../util/constants';
 
 
-export class Battle { // A room
-    constructor(id, access_token, refresh_token) {
-        this.id = id;
+class Battle extends Room { // A room
+    constructor(id, access_token, refresh_token, emitter) {
+        super (id, access_token, refresh_token, emitter);
+
         this.players = [];
-
-        this.spotifyAccessToken = access_token;
-        this.spotifyRefreshToken = refresh_token;
         this.host = undefined; // id of host player
 
-
         this.getId.bind(this);
-        this.checkToken.bind(this);
-        this.refreshToken.bind(this);
 
-        this.phase = "start";
         this.categories = loadCategoryDefaults();
         this.currentCategoryIndex = 0;
+        this.type = GAME_TYPE.GAME_TYPE_BATTLE;
 
         this.roundNum = 1;
+        this.playDuration = 1;
 
-        const refresh = () => this.refreshToken();
-        this.checkToken(refresh);
-    }
-
-    checkToken(refresh, ms_time=1200000){
-        this.intervalClock = setInterval( function() {
-            refresh()
-        }, ms_time);
-    };
-
-    refreshToken(){
-        const refresh_token = this.spotifyRefreshToken;
-        const authOptions = {
-            url: 'https://accounts.spotify.com/api/token',
-            headers: { 'Authorization': 'Basic ' + (new Buffer(SPOTIFY_CLIENT_ID + ':' + SPOTIFY_CLIENT_SECRET).toString('base64')) },
-            form: {
-            grant_type: 'refresh_token',
-            refresh_token: refresh_token
-            },
-            json: true
-        };
-
-        const checkToken = (a, b) => this.checkToken(a, b);
-        const refresh = () => this.refreshToken();
-
-        request.post(authOptions, function(error, response, body) {
-            if (!error && response.statusCode === 200) {
-                // console.log(body);
-                this.spotifyAccessToken = body.access_token;
-                //Need to send new access token to game monitor
-
-                // this.emitter.refreshToken({gameCode: this.id}, this.spotifyAccessToken);
-                // clearInterval(this.intervalClock);
-                // checkToken(refresh, body.expires_in);
-            }
-        });
+        this.submittedCategories = [];
     }
     
     getId(){
@@ -124,13 +86,6 @@ export class Battle { // A room
 
     setPhase(newPhase){
         this.phase = newPhase;
-    }
-
-    setMonitor(monitor){
-        this.monitor = monitor;
-    }
-    getMonitor(){
-        return this.monitor;
     }
 
     getPlayersByType(type){
@@ -225,4 +180,22 @@ export class Battle { // A room
             this.emitter.roundOver({gameCode: this.id});
         }
     }
+
+    setPlayDuration(playDuration) {
+        this.playDuration = playDuration;
+    }
+
+    getPlayDuration(playDuration) {
+        return this.playDuration;
+    }
+
+    addSubmittedCategory(category){
+        if (this.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL && this.phase === PHASE.CATEGORY_SUBMISSIONS_PHASE) {
+           this.submittedCategories.push(category); 
+        }
+        
+    }
 }
+
+
+export default Battle;

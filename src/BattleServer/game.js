@@ -1,5 +1,6 @@
 
-import {Battle} from './battle';
+import Battle from './Room/battle';
+import Party from './Room/party';
 import { generateRandomCode } from '../util/helpers';
 
 export class Game {
@@ -10,7 +11,14 @@ export class Game {
 
     initializeBattleRoom(access_token, refresh_token){
         const roomId = this.getUniqueId();
-        const room = new Battle(roomId, access_token, refresh_token);
+        const room = new Battle(roomId, access_token, refresh_token, this.emitter);
+        this.battleRooms[roomId] = room;
+        return roomId;
+    };
+
+    initializePartyRoom(access_token, refresh_token) {
+        const roomId = this.getUniqueId();
+        const room = new Party(roomId, access_token, refresh_token, this.emitter);
         this.battleRooms[roomId] = room;
         return roomId;
     };
@@ -54,7 +62,6 @@ export class Game {
 
     endGame(roomCode){
         this.removeRoom(roomCode);
-
         const newRegistry = {};
         Object.keys(this.userRegistry).forEach(key => {
             if (this.userRegistry[key] !== roomCode) {
@@ -63,5 +70,10 @@ export class Game {
         });
 
         this.userRegistry = newRegistry;
+        this.emitter.emitEvent(roomCode, "game exit");
+    }
+
+    setEmitter(emitter){
+        this.emitter = emitter;
     }
 }

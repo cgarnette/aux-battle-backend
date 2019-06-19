@@ -1,7 +1,10 @@
+import { PHASE, GAME_TYPE } from '../util/constants';
+
 export class SocketManager {
     constructor (socket, game){
         this.io = socket;
         this.game = game;
+        this.game.setEmitter(this);
         this.initSockets();
     }
 
@@ -11,6 +14,25 @@ export class SocketManager {
         io.on('connection', (client) => {
 
             console.log("connected");
+
+            // adds user to registry. Only necessary for party room mode
+            client.on('add', data => {
+                this.game.addToRegistry(client.id, data.gameCode);
+                const room = this.game.getRoomById(data.gameCode);
+
+                room.setMonitor(client.id);
+                client.join(data.gameCode);
+                io.to(client.id).emit("update", { property: "id", value: client.id });
+            });
+
+            client.on('get next', data => {
+                const room = this.game.getRoomById(data.gameCode);
+                if (room.getMonitor().id === client.id) {
+                    // console.log("theyre asking for tracks");
+                    // io.to(client.id).emit("update", { property: "trackURI", value: room.nextTrack() });
+                    room.setHostWaiting();
+                }
+            });
 
             client.on('init', data => {
                 this.init(client, data);
@@ -78,22 +100,37 @@ export class SocketManager {
     }
 
     join(player, data){
+        console.log("joining");
         player.join(data.gameCode); //Client sends gamecode and is added to that channel;
-
         const room = this.game.getRoomById(data.gameCode);
+
         if (room) {
-            room.addPlayer(player.id, data.username)
-            const numPlayers = room.getPlayers().length;
+            if (room.type === GAME_TYPE.GAME_TYPE_PARTY) {
+                this.io.to(player.id).emit("phase", {
+                    phase: PHASE.TRACK_SELECTION_PHASE,
+                    info: {
+                        id: player.id,
+                        keeper: true,
+                        roomType: GAME_TYPE.GAME_TYPE_PARTY
+                    } 
+                });
 
-            this.game.addToRegistry(player.id, data.gameCode);
+                this.game.addToRegistry(player.id, data.gameCode);
+            } else if (room.type === GAME_TYPE.GAME_TYPE_BATTLE) {
+                room.addPlayer(player.id, data.username)
+                const numPlayers = room.getPlayers().length;
 
-            if(numPlayers === 1) {
-                room.setHost(player.id);
-                this.io.to(player.id).emit('set role', {host: true, categories: room.getCategories()});
+                this.game.addToRegistry(player.id, data.gameCode);
+
+                if(numPlayers === 1) {
+                    room.setHost(player.id);
+                    this.io.to(player.id).emit('set role', {host: true, categories: room.getCategories()});
+                }
+                this.io.to(player.id).emit("player joined", {id: player.id});
+                this.io.to(room.getMonitor().id).emit("player joined", {players: room.getPlayers()});
+                this.io.to(room.getHost()).emit("player joined", {players: room.getPlayers()});
             }
-            this.io.to(player.id).emit("player joined", {id: player.id});
-            this.io.to(room.getMonitor().id).emit("player joined", {players: room.getPlayers()});
-            this.io.to(room.getHost()).emit("player joined", {players: room.getPlayers()});
+            
         }
     
     }
@@ -126,11 +163,12 @@ export class SocketManager {
 
         const category = room.getCategory();
         const roundNum = room.getRoundNum();
+        const playDuration = room.getPlayDuration();
 
-        room.setPhase("track-selection");
+        room.setPhase(PHASE.TRACK_SELECTION_PHASE);
 
         battlers.forEach(battler => this.io.to(battler.id).emit("phase", {
-            phase: "track-selection",
+            phase: PHASE.TRACK_SELECTION_PHASE,
             info: {
                 category,
                 roundNum,
@@ -138,16 +176,17 @@ export class SocketManager {
             }
         }) );
         judges.forEach(judge => this.io.to(judge.id).emit("phase", {
-            phase: "track-selection",
+            phase: PHASE.TRACK_SELECTION_PHASE,
             info: {
                 category
             }
         }) );
         this.io.to(monitor.id).emit("phase", {
-            phase: "track-selection",
+            phase: PHASE.TRACK_SELECTION_PHASE,
             info: {
                 category,
-                roundNum
+                roundNum,
+                playDuration
             }
         });
         room.setActivePlayer(battlers[0].id);
@@ -209,9 +248,9 @@ export class SocketManager {
         
     }
 
-    refreshToken(data, token) {
-        const room = this.game.getRoomById(data.gameCode);
-        this.io.to(room.getMonitor().id).emit("token", {token});
+    refreshToken(monitorId, token) {
+        const id = monitorId ? (monitorId.id ? monitorId.id : monitorId) : undefined;
+        this.io.to(id).emit("token", {token});
     }
 
     roundOver(data) {
@@ -254,5 +293,14 @@ export class SocketManager {
         setTimeout( () => {
             this.io.in(data.gameCode).emit("game exit")
         }, 20000);
+    }
+
+    emitEvent(roomCode, event, data) {
+        console.log("emitting", event);
+        if (data) {
+            this.io.in(roomCode).emit(event, data);
+        } else {
+            this.io.in(roomCode).emit(event);
+        }
     }
 }
