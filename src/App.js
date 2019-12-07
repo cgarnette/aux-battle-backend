@@ -3,7 +3,9 @@ import {
     SPOTIFY_CLIENT_ID, 
     SPOTIFY_CLIENT_SECRET, 
     SPOTIFY_REDIRECT_URL, 
-    AUX_BATTLE_CLIENT_URL 
+    AUX_BATTLE_CLIENT_URL, 
+    PHASE,
+    GAME_TYPE
 } from './util/constants.js';
 
 import Socket from 'socket.io';
@@ -30,6 +32,19 @@ app.get('/start', (req, res) => {
     if (access && refresh) {
         const newRoomId = currentGame.initializeBattleRoom(access, refresh);
         console.log("successfully created game");
+        res.status(200).json({roomCode: newRoomId});
+    } else {
+        res.status(500).json({error: "Tokens were not supplied"});
+    }
+});
+
+app.get('/start/freeforall', (req, res) => {
+    const access = req.query.access_token;
+    const refresh = req.query.refresh_token;
+
+    if (access && refresh) {
+        const newRoomId = currentGame.initializeFreeRoom(access, refresh);
+        console.log("successfully created free for all game");
         res.status(200).json({roomCode: newRoomId});
     } else {
         res.status(500).json({error: "Tokens were not supplied"});
@@ -131,12 +146,16 @@ app.get('/callback', (req, res) => {
   app.post('/battle/set_player_track', (req, res) => {
     const {roomCode, track, playerId} = req.body;
     const room = currentGame.getRoomById(roomCode);
+    console.log('playerId', playerId);
+    console.log('Players', room.getActivePlayers());
     const player = room.getPlayerById(playerId);
 
     player.setSelectedTrack(track);
 
-    room.checkPlayerTrackEntries();
-
+    if (room.type !== GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
+      room.checkPlayerTrackEntries();  
+    }
+    
     res.status(200).json({success: "submission successful"});
   });
 
@@ -144,16 +163,30 @@ app.get('/callback', (req, res) => {
     const roomCode = req.query.roomCode;
     const room = currentGame.getRoomById(roomCode);
 
-    const auxKeepers = room.getPlayersByType("battler").map(keeper => {
-        const albumArt = keeper.selectedTrack.album.images.length > 0 ? keeper.selectedTrack.album.images[1 || 0].url : "";
-        return {
-            id: keeper.id,
-            username: keeper.username,
-            trackTitle: keeper.selectedTrack.name,
-            albumArt
-        };
-    });
-
+    let auxKeepers = [];
+    if (room.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
+        auxKeepers = room.getActivePlayers().map(keeper => {
+            if (keeper.selectedTrack) {
+                const albumArt = keeper.selectedTrack.album.images.length > 0 ? keeper.selectedTrack.album.images[1 || 0].url : "";
+                return {
+                    id: keeper.id,
+                    username: keeper.username,
+                    trackTitle: keeper.selectedTrack.name,
+                    albumArt
+                };
+            }
+        });
+    } else {
+        auxKeepers = room.getPlayersByType("battler").map(keeper => {
+            const albumArt = keeper.selectedTrack.album.images.length > 0 ? keeper.selectedTrack.album.images[1 || 0].url : "";
+            return {
+                id: keeper.id,
+                username: keeper.username,
+                trackTitle: keeper.selectedTrack.name,
+                albumArt
+            };
+        });
+    }
     res.status(200).json({keepers: auxKeepers});
   });
 
@@ -177,8 +210,62 @@ app.get('/callback', (req, res) => {
 
       const room = currentGame.getRoomById(roomCode);
 
-      
+      const trimmedCat = category.trim();
+
+      if (trimmedCat.length > 0) {
+          // add it to the submitted categories array for the free for all
+          room.addSubmittedCategory(trimmedCat);
+      } else {
+          res.status(200).json({ error: 'empty category' });
+      }
   });
+
+  app.get('/change', (req, res) => {
+      const roomCode = req.query.roomCode;
+      const phase = req.query.phase;
+
+      const room = currentGame.getRoomById(roomCode);
+
+      if (phase === PHASE.CATEGORY_SUBMISSIONS_PHASE) {
+          room.categorySubmissionComplete();
+      }
+  });
+
+  app.get('/freeforall/trackselect', (req, res) => {
+    const roomCode = req.query.roomCode;
+    const room = currentGame.getRoomById(roomCode);
+
+    room.startTrackSelect();
+
+    res.status(200).json({success: "track selection started"});
+});
+
+app.get('/start/roundplay', (req, res) => {
+    const roomCode = req.query.roomCode;
+    const room = currentGame.getRoomById(roomCode);
+
+    room.startRoundPlay();
+
+    res.status(200).json({success: "round play phase started"});
+});
+
+app.get('/vote/close', (req, res) => {
+    const roomCode = req.query.roomCode;
+    const room = currentGame.getRoomById(roomCode);
+
+    room.closeVoting();
+
+    res.status(200).json({success: "round play phase started"});
+});
+
+app.get('/join/close', (req, res) => {
+    const roomCode = req.query.roomCode;
+    const room = currentGame.getRoomById(roomCode);
+
+    room.triggerStartGame();
+
+    res.status(200).json({success: "Game Flow Started"});
+});
 
   app.post('/settings', (req, res) => {
     const {roomCode, settings} = req.body;
@@ -192,6 +279,17 @@ app.get('/callback', (req, res) => {
         }
         res.status(200).json({success: "update successful"})
     }
+  });
+
+  app.post('/update/user', (req, res) => {
+      const { roomCode, state } = req.body;
+
+      const room = currentGame.getRoomById(roomCode);
+      const player = room.getPlayers().find(_player => _player.username === state.username);
+      console.log('username', state.username);
+      player.setGameState(state);
+
+      res.status(200).send('success');
   });
 
   //////// Party Room Mode ///////////////

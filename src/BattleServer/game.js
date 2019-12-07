@@ -1,6 +1,7 @@
 
 import Battle from './Room/battle';
 import Party from './Room/party';
+import Free from './Room/free';
 import { generateRandomCode } from '../util/helpers';
 
 export class Game {
@@ -12,6 +13,13 @@ export class Game {
     initializeBattleRoom(access_token, refresh_token){
         const roomId = this.getUniqueId();
         const room = new Battle(roomId, access_token, refresh_token, this.emitter);
+        this.battleRooms[roomId] = room;
+        return roomId;
+    };
+
+    initializeFreeRoom(access_token, refresh_token){
+        const roomId = this.getUniqueId();
+        const room = new Free(roomId, access_token, refresh_token, this.emitter);
         this.battleRooms[roomId] = room;
         return roomId;
     };

@@ -11,7 +11,9 @@ class Battle extends Room { // A room
         super (id, access_token, refresh_token, emitter);
 
         this.players = [];
+        this.activePlayers = [];
         this.host = undefined; // id of host player
+        this.phase = 'join';
 
         this.getId.bind(this);
 
@@ -20,7 +22,7 @@ class Battle extends Room { // A room
         this.type = GAME_TYPE.GAME_TYPE_BATTLE;
 
         this.roundNum = 1;
-        this.playDuration = 1;
+        this.playDuration = .2;
 
         this.submittedCategories = [];
     }
@@ -31,6 +33,11 @@ class Battle extends Room { // A room
     getPlayers(){
         return this.players;
     }
+
+    getActivePlayers() {
+        return this.activePlayers;
+    }
+
     getToken(){
         return this.spotifyToken;
     }
@@ -69,19 +76,40 @@ class Battle extends Room { // A room
     }
 
     setHost(host){
-        this.host = host;
-        const player = this.getPlayerById(host);
+        const player = this.getPlayerByUsername(host);
+        this.host = player;
+        console.log('found host', player);
         player.setType("host");
     }
 
     setKeeper(keeper) {
-        const player = this.getPlayerById(keeper.id)
+        const player = this.getPlayerById(keeper.id);
+        player.gameState['auxKeeper'] = true;
+        player.gameState['keeper'] = true;
         player.setType("battler");
     }
 
     addPlayer(id, username){
         const player = new Player(username, id);
-        this.players.push(player);
+        const existingPlayer = this.players.find(_player => _player.username.toLowerCase() === username.toLowerCase());
+
+        if (!existingPlayer) {
+            console.log('new', player);
+            this.players.push(player);
+            this.activePlayers.push(player);
+        } else {
+            console.log('existing', existingPlayer);
+            existingPlayer.setId(id);
+            this.activePlayers.push(existingPlayer);
+        }
+    }
+
+    removePlayer(username) {
+        this.activePlayers = this.activePlayers.filter(player => player.getUsername().toLowerCase() !== username.toLowerCase());
+    }
+
+    addToActive(player) {
+        this.activePlayers.push(player);
     }
 
     setPhase(newPhase){
@@ -89,11 +117,19 @@ class Battle extends Room { // A room
     }
 
     getPlayersByType(type){
+        return this.activePlayers.filter(player => player.type === type);
+    }
+
+    getAllPlayersByType(type){
         return this.players.filter(player => player.type === type);
     }
 
     getPlayerById(id){
         return this.players.find(player => player.id === id);
+    }
+
+    getPlayerByUsername(username){
+        return this.activePlayers.find(player => player.getUsername().toLowerCase() === username.toLowerCase());
     }
 
     getCategory(){
@@ -127,7 +163,7 @@ class Battle extends Room { // A room
     }
 
     nextRound(){
-        this.players.forEach(player => player.newRound());
+        this.activePlayers.forEach(player => player.newRound());
         const nextCat = this.nextCategory();
         this.roundNum += 1;
 
@@ -174,10 +210,11 @@ class Battle extends Room { // A room
         const battlers = this.getPlayersByType("battler");
         let totalScore = 0;
         battlers.forEach(battler => totalScore += battler.roundScore);
-        const roundOver = (totalScore/5) === this.getPlayers().length - battlers.length;
+        const roundOver = (totalScore/5) === this.activePlayers.length - battlers.length;
 
         if (roundOver) {
-            this.emitter.roundOver({gameCode: this.id});
+            this.emitter.wait({ gameCode: this.id })
+            setTimeout(() => this.emitter.roundOver({ gameCode: this.id }), 5000);
         }
     }
 
@@ -185,15 +222,19 @@ class Battle extends Room { // A room
         this.playDuration = playDuration;
     }
 
-    getPlayDuration(playDuration) {
+    getPlayDuration() {
         return this.playDuration;
     }
 
-    addSubmittedCategory(category){
-        if (this.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL && this.phase === PHASE.CATEGORY_SUBMISSIONS_PHASE) {
-           this.submittedCategories.push(category); 
-        }
-        
+    startTrackSelect(){
+        if (this.activePlayers.length === 0) return;
+        this.phase = PHASE.TRACK_SELECTION_PHASE;
+        this.emitter.wait({gameCode: this.id});
+        setTimeout(() => this.emitter.trackSelect({gameCode: this.id}), 5000);
+    }
+
+    triggerStartGame(){
+        this.emitter.startGame(undefined, {gameCode: this.id});
     }
 }
 

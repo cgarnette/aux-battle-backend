@@ -6,6 +6,7 @@ export class Player {
         this.type = "judge";
         this.id = id;
         this.username = username;
+        this.gameState = {};
     }
 
     newRound(){
@@ -15,6 +16,12 @@ export class Player {
         this.selectedTrack = undefined;
     }
 
+    setGameState(state){
+        this.gameState = state;
+    }
+    getGameState(){
+        return this.gameState;
+    }
     getGameScore(){
         return this.gameScore;
     }
@@ -27,6 +34,10 @@ export class Player {
     }
     getId(){
         return this.id;
+    }
+
+    setId(id){
+        this.id = id;
     }
 
     setType(type){

@@ -74,10 +74,20 @@ export class SocketManager {
                 if (room) {
                     const monitor = room.getMonitor();
 
+                    if ( room.getPhase() === PHASE.JOIN_PHASE) {
+                        // TODO
+                        // Send out updated list of players to monitor and host
+                    }
+
                     if (monitor.id === client.id) {
                         this.game.endGame(room.id);
                     } else {
                         this.game.removePlayer(client.id);
+                        console.log('players', room.getActivePlayers());
+                        const playerToRemove = room.getPlayerById(client.id);
+                        console.log('id to remove', client.id);
+                        console.log('playerToRemove', playerToRemove);
+                        room.removePlayer(playerToRemove.username);
                     }
                 }
             });
@@ -101,11 +111,15 @@ export class SocketManager {
 
     join(player, data){
         console.log("joining");
-        player.join(data.gameCode); //Client sends gamecode and is added to that channel;
         const room = this.game.getRoomById(data.gameCode);
 
         if (room) {
+            console.log('room exists');
+
+            let freeForAll = false;
+
             if (room.type === GAME_TYPE.GAME_TYPE_PARTY) {
+                player.join(data.gameCode);
                 this.io.to(player.id).emit("phase", {
                     phase: PHASE.TRACK_SELECTION_PHASE,
                     info: {
@@ -116,33 +130,108 @@ export class SocketManager {
                 });
 
                 this.game.addToRegistry(player.id, data.gameCode);
-            } else if (room.type === GAME_TYPE.GAME_TYPE_BATTLE) {
-                room.addPlayer(player.id, data.username)
-                const numPlayers = room.getPlayers().length;
+            } else if (room.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
+                // Insert join actions for free for all game here.
 
+                console.log('type freeforall');
+
+                freeForAll = true;
+                if (room.getPlayerByUsername(data.username)) {
+                    console.log('step 1 inner');
+                    player.emit( "phase", { phase: 'join', info: { error: 'Username Taken' } } );
+                    return;
+                }
+
+                player.join(data.gameCode);
                 this.game.addToRegistry(player.id, data.gameCode);
 
+                const existingPlayer = room.getPlayers().find(_player => _player.username.toLowerCase() === data.username.toLowerCase());
+
+                if (existingPlayer) {
+                    existingPlayer.setId(player.id);
+
+                    const oldState = existingPlayer.getGameState();
+                    oldState.phase = room.getPhase();
+                    oldState.id = player.id;
+                    oldState.category = room.getCategory(); // May or may not need this part
+
+                    room.addToActive(existingPlayer);
+                    this.io.to(player.id).emit("state override", oldState);
+                    return;
+                } 
+                room.addPlayer(player.id, data.username);
+
+                this.io.to(player.id).emit("player joined", {id: player.id, freeForAll: true});
+                this.io.to(room.getMonitor().id).emit("player joined", {players: room.getActivePlayers()});
+
+            } else if (room.type === GAME_TYPE.GAME_TYPE_BATTLE) {
+                console.log('room type battle');
+
+                if (room.getPlayerByUsername(data.username)) {
+                    console.log('step 1 inner');
+                    player.emit( "phase", { phase: 'join', info: { error: 'Username Taken' } } );
+                    return;
+                }
+
+                console.log('username not taken');
+                
+                player.join(data.gameCode);
+                this.game.addToRegistry(player.id, data.gameCode);
+                
+                console.log('joined and added to registry');
+
+                const existingPlayer = room.getPlayers().find(_player => _player.username.toLowerCase() === data.username.toLowerCase());
+                if (existingPlayer) {
+                    existingPlayer.setId(player.id);
+                    const oldState = existingPlayer.getGameState();
+
+                    if (oldState.host) {
+                        oldState.phase = room.getPhase() === PHASE.JOIN_PHASE ? 'waiting-room' : room.getPhase();
+                    } else {
+                        oldState.phase = room.getPhase() === PHASE.JOIN_PHASE ? 'wait' : room.getPhase();
+                    }
+                    oldState.id = player.id;
+                    oldState.category = room.getCategory();
+
+                    room.addToActive(existingPlayer);
+                    this.io.to(player.id).emit("state override", oldState);
+                    return;
+                } 
+                room.addPlayer(player.id, data.username);
+
+                const numPlayers = room.getActivePlayers().length;
+
                 if(numPlayers === 1) {
-                    room.setHost(player.id);
-                    this.io.to(player.id).emit('set role', {host: true, categories: room.getCategories()});
+                    room.setHost(data.username);
+                    this.io.to(player.id).emit('set role', {host: true, categories: room.getCategories(), playDuration: room.getPlayDuration()});
                 }
                 this.io.to(player.id).emit("player joined", {id: player.id});
-                this.io.to(room.getMonitor().id).emit("player joined", {players: room.getPlayers()});
-                this.io.to(room.getHost()).emit("player joined", {players: room.getPlayers()});
+                this.io.to(room.getMonitor().id).emit("player joined", {players: room.getActivePlayers()});
+                this.io.to(room.getHost().id).emit("player joined", {players: room.getActivePlayers()});
             }
             
+        } else {
+            this.io.to(player.id).emit("invalid", { error: "Invalid Room" });
         }
     
     }
 
     startGame(player, data){
 
-        this.setKeepers(data);
+        if (data.keepers) {
+           this.setKeepers(data); 
+        }
+        
         this.io.in(data.gameCode).emit("phase", { phase: "game start" });
         const room = this.game.getRoomById(data.gameCode);
 
         room.setPhase("game start");
-        setTimeout(() => this.trackSelect(data), 5000);
+
+        if (room.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
+            setTimeout(() => this.categorySubmit(data), 5000);
+        } else {
+            setTimeout(() => this.trackSelect(data), 5000);
+        }  
     }
 
     setKeepers(data) {
@@ -154,11 +243,32 @@ export class SocketManager {
         });
     }
 
+    categorySubmit(data) {
+        const room = this.game.getRoomById(data.gameCode);
+        const players = room.getActivePlayers();
+        const monitor = room.getMonitor();
+        const category = room.getCategory();
+
+        room.setPhase(PHASE.CATEGORY_SUBMISSIONS_PHASE);
+
+        players.forEach(battler => this.io.to(battler.id).emit("phase", {
+            phase: PHASE.CATEGORY_SUBMISSIONS_PHASE,
+            info: {
+            }
+        }) );
+
+        this.io.to(monitor.id).emit("phase", {
+            phase: PHASE.CATEGORY_SUBMISSIONS_PHASE,
+            info: {
+            }
+        });
+
+    }
+
     trackSelect(data) {
 
         const room = this.game.getRoomById(data.gameCode);
-        const battlers = room.getPlayersByType("battler");
-        const judges = room.getPlayersByType("judge");
+        let battlers = room.getActivePlayers();
         const monitor = room.getMonitor();
 
         const category = room.getCategory();
@@ -166,6 +276,18 @@ export class SocketManager {
         const playDuration = room.getPlayDuration();
 
         room.setPhase(PHASE.TRACK_SELECTION_PHASE);
+
+        if (room.type === GAME_TYPE.GAME_TYPE_BATTLE) {
+            const judges = room.getPlayersByType("judge");
+            battlers = room.getPlayersByType("battler");
+
+            judges.forEach(judge => this.io.to(judge.id).emit("phase", {
+                phase: PHASE.TRACK_SELECTION_PHASE,
+                info: {
+                    category
+                }
+            }) );
+        }
 
         battlers.forEach(battler => this.io.to(battler.id).emit("phase", {
             phase: PHASE.TRACK_SELECTION_PHASE,
@@ -175,12 +297,7 @@ export class SocketManager {
                 showTrackSearch: true
             }
         }) );
-        judges.forEach(judge => this.io.to(judge.id).emit("phase", {
-            phase: PHASE.TRACK_SELECTION_PHASE,
-            info: {
-                category
-            }
-        }) );
+        
         this.io.to(monitor.id).emit("phase", {
             phase: PHASE.TRACK_SELECTION_PHASE,
             info: {
@@ -189,25 +306,30 @@ export class SocketManager {
                 playDuration
             }
         });
+
+        console.log('battlers', battlers);
         room.setActivePlayer(battlers[0].id);
     }
 
     roundPlay(data) {
 
         const room = this.game.getRoomById(data.gameCode);
-        const battlers = room.getPlayersByType("battler");
+
+        if (!room) return;
+
+        const battlers = room.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL ? room.getActivePlayers() : room.getAllPlayersByType("battler");
         const player = room.getActivePlayer();
 
         if (!player) {
             room.setPhase("vote");
-            this.io.to(room.getMonitor().id).emit("phase", {phase: "get ready"});
+            this.io.to(room.getMonitor().id).emit("phase", { phase: "get ready" });
 
             setTimeout( () => {
                 this.io.in(data.gameCode).emit("phase", { phase: "vote" });
             }, 5000);
             
         } else {
-            const track = player.getSelectedTrack()
+            const track = player.getSelectedTrack();
             const trackURI = track.uri;
             const albumArt = track.album.images.length > 1 ? track.album.images[1 || 0].url : "";
             room.setPhase("round-play");
@@ -227,7 +349,20 @@ export class SocketManager {
         if (player) {
             const nextActiveIndex = battlers.findIndex(battler => battler.id === player.id) + 1;
             if(nextActiveIndex < battlers.length) {
-                room.setActivePlayer(battlers[nextActiveIndex].id);
+
+                let playerFound = false;
+                for (let i = nextActiveIndex; i < battlers.length; i++) {
+                    if (battlers[i].selectedTrack) {
+                        room.setActivePlayer(battlers[i].id);
+                        playerFound = true;
+                        break;
+                    }
+                }
+
+                if (!playerFound) {
+                    room.setActivePlayer(undefined);
+                }
+                
             } else {
                 room.setActivePlayer(undefined);
             }

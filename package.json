@@ -7,7 +7,8 @@
     "start": "npm run build && node lib/App.js",
     "start-remote": "npm run build && sudo node lib/App.js",
     "build": "babel --presets es2015 -d lib/ src",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:db:local": "docker run -p 5984:5984 --name aux-battle-db -d couchdb:2.3.1"
   },
   "author": "Charles Garnette",
   "license": "ISC",
@@ -19,6 +20,7 @@
     "cors": "^2.8.5",
     "dotenv": "^7.0.0",
     "express": "^4.16.4",
+    "nano": "^8.1.0",
     "path": "^0.12.7",
     "querystring": "^0.2.0",
     "request": "^2.88.0",

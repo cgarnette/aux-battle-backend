@@ -18,7 +18,9 @@ export const GAME_TYPE_FREE_FOR_ALL = 'freeForAll';
 
 export const PHASE = {
     TRACK_SELECTION_PHASE: 'track-selection',
-    CATEGORY_SUBMISSIONS_PHASE: 'category-submission'
+    CATEGORY_SUBMISSIONS_PHASE: 'category-submission',
+    JOIN_PHASE: 'join',
+    VOTE_PHASE: 'vote'
 };
 
 export const GAME_TYPE = {

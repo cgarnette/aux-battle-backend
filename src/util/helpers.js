@@ -25,6 +25,10 @@ export const loadCategoryDefaults = () => {
     return randomCategories;
 };
 
+export const randomNumGen = (length=1) => {
+    return Math.floor(Math.random() * (length-1));
+};
+
 export const generateRandomCode = (length=4) => {
     const alpha_characters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
     const lower_characters = alpha_characters.toLowerCase();
