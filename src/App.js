@@ -32,7 +32,7 @@ app.get('/start', (req, res) => {
     if (access && refresh) {
         const newRoomId = currentGame.initializeBattleRoom(access, refresh);
         console.log("successfully created game");
-        res.status(200).json({roomCode: newRoomId});
+        res.status(200).json({ roomCode: newRoomId });
     } else {
         res.status(500).json({error: "Tokens were not supplied"});
     }
@@ -130,7 +130,6 @@ app.get('/callback', (req, res) => {
             const access_token = body.access_token,
                 refresh_token = body.refresh_token;
 
-            
             res.status(200).json({access_token, refresh_token})
         } else {
             res.status(500).send({
@@ -144,63 +143,52 @@ app.get('/callback', (req, res) => {
   });
 
   app.post('/battle/set_player_track', (req, res) => {
-    const {roomCode, track, playerId} = req.body;
+    const { roomCode, track, playerId } = req.body;
     const room = currentGame.getRoomById(roomCode);
-    console.log('playerId', playerId);
-    console.log('Players', room.getActivePlayers());
-    const player = room.getPlayerById(playerId);
+    const playerStore = room.getPlayerStore();
 
-    player.setSelectedTrack(track);
+    playerStore.setSelectedTrack(playerId, track);
 
-    if (room.type !== GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
-      room.checkPlayerTrackEntries();  
-    }
+    // if (room.type !== GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
+    //   room.checkPlayerTrackEntries();  
+    // }
+
+    room.checkPlayerTrackEntries();  
     
     res.status(200).json({success: "submission successful"});
   });
 
-  app.get('/battle/aux_keepers', (req, res) => {
+  app.get('/battle/djs', (req, res) => {
     const roomCode = req.query.roomCode;
     const room = currentGame.getRoomById(roomCode);
+    const playerStore = room.getPlayerStore();
 
-    let auxKeepers = [];
-    if (room.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
-        auxKeepers = room.getActivePlayers().map(keeper => {
-            if (keeper.selectedTrack) {
-                const albumArt = keeper.selectedTrack.album.images.length > 0 ? keeper.selectedTrack.album.images[1 || 0].url : "";
-                return {
-                    id: keeper.id,
-                    username: keeper.username,
-                    trackTitle: keeper.selectedTrack.name,
-                    albumArt
-                };
-            }
-        });
-    } else {
-        auxKeepers = room.getPlayersByType("battler").map(keeper => {
-            const albumArt = keeper.selectedTrack.album.images.length > 0 ? keeper.selectedTrack.album.images[1 || 0].url : "";
-            return {
-                id: keeper.id,
-                username: keeper.username,
-                trackTitle: keeper.selectedTrack.name,
-                albumArt
-            };
-        });
-    }
-    res.status(200).json({keepers: auxKeepers});
+    const djs = playerStore.getDJs().map(dj => {
+        const albumArt = dj.selectedTrack.album.images.length > 0 ? dj.selectedTrack.album.images[1 || 0].url : "";
+        return {
+            id: dj.id,
+            username: dj.username,
+            trackTitle: dj.selectedTrack.name,
+            albumArt
+        };
+    });
+    res.status(200).json({ djs: djs });
   });
 
   app.get('/vote', (req, res) => {
     const roomCode = req.query.roomCode;
-    const keeperId = req.query.keeperId;
+    const djId = req.query.djId;
 
     const room = currentGame.getRoomById(roomCode);
-    const player = room.getPlayerById(keeperId);
+    const playerStore = room.getPlayerStore();
+
+    const player = playerStore.getPlayerById(djId);
 
     player.roundScore += 5;
 
     room.isVotingFinished();
 
+    console.log("vote has been cast!");
     res.status(200).json({success: "vote successful"});
   });
 
@@ -272,22 +260,28 @@ app.get('/join/close', (req, res) => {
 
     const room = currentGame.getRoomById(roomCode);
 
-    if (settings.categories) {
-        room.setCategories(settings.categories);
-        if (settings.playDuration) {
-            room.setPlayDuration(settings.playDuration);
-        }
-        res.status(200).json({success: "update successful"})
-    }
+    console.log('settings received');
+    room.setSettings(settings);
+    return res.status(200).json({success: "update successful"});
+
+    // if (settings.categories) {
+    //     room.setCategories(settings.categories);
+    //     if (settings.playDuration) {
+    //         room.setPlayDuration(settings.playDuration);
+    //     }
+    //     res.status(200).json({success: "update successful"})
+    // }
   });
 
   app.post('/update/user', (req, res) => {
       const { roomCode, state } = req.body;
 
       const room = currentGame.getRoomById(roomCode);
-      const player = room.getPlayers().find(_player => _player.username === state.username);
+      const playerStore = room.getPlayerStore();
+
+      const player = playerStore.getAllPlayers().find(_player => _player.username === state.username);
       console.log('username', state.username);
-      player.setGameState(state);
+      player.gameState = state;
 
       res.status(200).send('success');
   });

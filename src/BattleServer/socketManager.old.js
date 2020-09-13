@@ -17,7 +17,9 @@ export class SocketManager {
             ////////////////////// PARTY MODE ONLY ///////////////////////////
             //////////////////////////////////////////////////////////////////
             //////////////////////////////////////////////////////////////////
+            // adds user to registry
             client.on('add', data => {
+                this.game.addToRegistry(client.id, data.gameCode);
                 const room = this.game.getRoomById(data.gameCode);
 
                 room.setMonitor(client.id);
@@ -28,10 +30,11 @@ export class SocketManager {
             // set waiting for next song
             client.on('get next', data => {
                 const room = this.game.getRoomById(data.gameCode);
-                if (room) {
+                if (room.getMonitor().id === client.id) {
                     room.setHostWaiting();
                 }
             });
+
             //////////////////////////////////////////////////////////////////
             ///////////////////////////////////////////////////////////////////
 
@@ -43,9 +46,20 @@ export class SocketManager {
                 this.join(client, data);
             });
 
+            client.on('set settings', data => {
+                const room = this.game.getRoomById(data.gameCode);
+                if (data.categories) {
+                    room.setCategories(data.categories);
+                }
+            });
+
             client.on('song-complete', data=> {
                 this.wait(data);
                 setTimeout(() => this.roundPlay(data), 5000);
+            });
+
+            client.on('voting-closed', data => {
+                
             });
 
             client.on('start', data => {
@@ -53,6 +67,8 @@ export class SocketManager {
             });
         
             client.on('phase over', data => {
+                gameDriver.getRoom(data.gameCode).stopAcceptingAnswers();
+                gameDriver.getRoom(data.gameCode).resolvePhase();
                 io.sockets.in(data.gameCode).emit('phase over', "new phase coming soon");
             });
 
@@ -61,119 +77,158 @@ export class SocketManager {
                 if (room) {
                     const monitor = room.getMonitor();
 
+                    if ( room.getPhase() === PHASE.JOIN_PHASE) {
+                        // TODO
+                        // Send out updated list of players to monitor and host
+                    }
+
                     if (monitor.id === client.id) {
-                        console.log("monitor has disconnected");
-                        this.game.endGame(room.id)
-                    } else if ( room.getPhase() === PHASE.JOIN_PHASE) {
-                        const playerStore = room.getPlayerStore();
-
-                        this.game.removePlayer(client.id);
-                        playerStore.playerOnHold(client.id);
-                        playerStore.removePlayer({ id: client.id });
-
-                        this.io.to(playerStore.getHost().id).emit("player joined", { players: playerStore.getAllPlayers() });
-                        this.io.to(monitor.id).emit("player joined", { players: playerStore.getAllPlayers() });
+                        this.game.endGame(room.id);
                     } else {
-                        const playerStore = room.getPlayerStore();
-                        playerStore.playerOnHold(client.id, true)
+                        this.game.removePlayer(client.id);
+                        console.log('players', room.getActivePlayers());
+                        const playerToRemove = room.getPlayerById(client.id);
+                        console.log('id to remove', client.id);
+                        console.log('playerToRemove', playerToRemove);
+                        room.removePlayer(playerToRemove.username);
                     }
                 }
             });
         });
     }
 
-    init(monitor, data){
+    init(player, data){
         const room = this.game.getRoomById(data.gameCode);
         if (room) {
             room.setEmitter(this);
-            monitor.join(data.gameCode);
-            room.setMonitor(monitor);
+            player.join(data.gameCode);
+            room.setMonitor(player);
             room.setPhase("join");
-            monitor.emit("phase", { phase: room.getPhase() });
+            player.emit("phase", { phase: room.getPhase() });
+
+            // const test = setTimeout(() => this.startGame(player, data), 5000);
+
+            this.game.addToRegistry(player.id, data.gameCode);
         } 
     }
 
     join(player, data){
         console.log("joining");
         const room = this.game.getRoomById(data.gameCode);
+
         if (room) {
             console.log('room exists');
-            const playerStore = room.getPlayerStore();
-            const phase = room.getPhase();
 
-            if (phase === 'join') { // The only time new users are allowed to join
-                if (playerStore.getPlayerByUsername(data.username)) {
+            if (room.type === GAME_TYPE.GAME_TYPE_PARTY) {
+                player.join(data.gameCode);
+                this.io.to(player.id).emit("phase", {
+                    phase: PHASE.TRACK_SELECTION_PHASE,
+                    info: {
+                        id: player.id,
+                        keeper: true,
+                        roomType: GAME_TYPE.GAME_TYPE_PARTY
+                    } 
+                });
+
+                this.game.addToRegistry(player.id, data.gameCode);
+            } else {
+                console.log('room type battle');
+
+                if (room.getPlayerByUsername(data.username)) {
+                    console.log('step 1 inner');
                     player.emit( "phase", { phase: 'join', info: { error: 'Username Taken' } } );
                     return;
                 }
 
-                this.game.addToRegistry(player.id, data.gameCode);
-                playerStore.addPlayer({ id: player.id, username: data.username }, true);
+                console.log('username not taken');
+                
                 player.join(data.gameCode);
+                this.game.addToRegistry(player.id, data.gameCode);
+                
+                console.log('joined and added to registry');
 
-                const playerCount = playerStore.activePlayers;
+                const existingPlayer = room.getPlayers().find(_player => _player.username.toLowerCase() === data.username.toLowerCase());
+                if (existingPlayer) {
+                    existingPlayer.setId(player.id);
 
-                if(playerCount === 1) { // first player to join is the host
-                    playerStore.setHost(data);
-                    player.emit('set role', { host: true, settings: room.settings });
-                    player.emit("player joined", { id: player.id, players: playerStore.getAllPlayers() });
-                } else {
-                    const host = playerStore.getHost();
-                    player.emit("player joined", { id: player.id });
-                    this.io.to(host.id).emit("player joined", { players: playerStore.getAllPlayers() });
+                    const oldState = existingPlayer.getGameState();
+                    oldState.phase = room.getPhase() === PHASE.JOIN_PHASE ? 'waiting-room' : room.getPhase();
+                    oldState.id = player.id;
+                    oldState.category = room.getCategory();
+                        
+                    room.addToActive(existingPlayer);
+                    this.io.to(player.id).emit("state override", oldState);
+                    return;
+                } 
+                room.addPlayer(player.id, data.username);
+
+                const numPlayers = room.getActivePlayers().length;
+
+                if(numPlayers === 1) {
+                    room.setHost(data.username);
+                    this.io.to(player.id).emit('set role', {host: true, categories: room.getCategories(), playDuration: room.getPlayDuration()});
                 }
-                this.io.to(room.getMonitor().id).emit("player joined", { players: playerStore.getAllPlayers() }); 
-            } else { // Game is ongoing, only reconnecting/returning players allowed
-                const successfullyAdded = playerStore.addPlayer({ id: player.id, username: data.username });
-                if (successfullyAdded) {
-                    player.join(data.gameCode);
-                    this.io.to(room.getMonitor().id).emit("player joined", { players: playerStore.getAllPlayers() });
-                }
-            } 
+                this.io.to(player.id).emit("player joined", {id: player.id});
+                this.io.to(room.getMonitor().id).emit("player joined", {players: room.getActivePlayers()});
+                this.io.to(room.getHost().id).emit("player joined", {players: room.getActivePlayers()});
+            }
+            
         }
+    
     }
 
     startGame(data){
-        if (data.djs) {
-           this.setDJs(data); 
-        }
 
-        console.log('start data', data);
+        if (data.keepers) {
+           this.setKeepers(data); 
+        }
         
         this.io.in(data.gameCode).emit("phase", { phase: "game start" });
         const room = this.game.getRoomById(data.gameCode);
 
         room.setPhase("game start");
 
-        if (room.settings.categorySelector === 'judges') {
+        if (room.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
             setTimeout(() => this.categorySubmit(data), 5000);
         } else {
             setTimeout(() => this.trackSelect(data), 5000);
         }  
     }
 
-    setDJs(data) {
+    setKeepers(data) {
         const room = this.game.getRoomById(data.gameCode);
-        const playerStore = room.getPlayerStore();
 
-        data.djs.forEach(dj => {
-            playerStore.setDJ(dj.id);
-            this.io.to(dj.id).emit('set role', { dj: true });
+        data.keepers.forEach(keeper => {
+            room.setKeeper(keeper);
+            this.io.to(keeper.id).emit('set role', {keeper: true});
         });
     }
 
     categorySubmit(data) {
         const room = this.game.getRoomById(data.gameCode);
+        const players = room.getActivePlayers();
+        const monitor = room.getMonitor();
+
         room.setPhase(PHASE.CATEGORY_SUBMISSIONS_PHASE);
-        this.io.in(data.gameCode).emit("phase", { phase: room.getPhase(), info: {} });
+
+        players.forEach(battler => this.io.to(battler.id).emit("phase", {
+            phase: PHASE.CATEGORY_SUBMISSIONS_PHASE,
+            info: {
+            }
+        }) );
+
+        this.io.to(monitor.id).emit("phase", {
+            phase: PHASE.CATEGORY_SUBMISSIONS_PHASE,
+            info: {
+            }
+        });
+
     }
 
     trackSelect(data) {
-        const room = this.game.getRoomById(data.gameCode);
 
-        const playerStore = room.getPlayerStore();
-        const djs = playerStore.getDJs();
-        const judges = playerStore.getJudges();
+        const room = this.game.getRoomById(data.gameCode);
+        let battlers = room.getActivePlayers();
         const monitor = room.getMonitor();
 
         const category = room.getCategory();
@@ -182,15 +237,20 @@ export class SocketManager {
 
         room.setPhase(PHASE.TRACK_SELECTION_PHASE);
 
-        judges.forEach(judge => this.io.to(judge.id).emit("phase", {
-            phase: room.getPhase(),
-            info: {
-                category
-            }
-        }) );
+        if (room.type === GAME_TYPE.GAME_TYPE_BATTLE) {
+            const judges = room.getPlayersByType("judge");
+            battlers = room.getPlayersByType("battler");
 
-        djs.forEach(dj => this.io.to(dj.id).emit("phase", {
-            phase: room.getPhase(),
+            judges.forEach(judge => this.io.to(judge.id).emit("phase", {
+                phase: PHASE.TRACK_SELECTION_PHASE,
+                info: {
+                    category
+                }
+            }) );
+        }
+
+        battlers.forEach(battler => this.io.to(battler.id).emit("phase", {
+            phase: PHASE.TRACK_SELECTION_PHASE,
             info: {
                 category,
                 roundNum,
@@ -199,7 +259,7 @@ export class SocketManager {
         }) );
         
         this.io.to(monitor.id).emit("phase", {
-            phase: room.getPhase(),
+            phase: PHASE.TRACK_SELECTION_PHASE,
             info: {
                 category,
                 roundNum,
@@ -207,17 +267,18 @@ export class SocketManager {
             }
         });
 
-        room.setActiveDJ(djs[0].id);
+        console.log('battlers', battlers);
+        room.setActivePlayer(battlers[0].id);
     }
 
     roundPlay(data) {
+
         const room = this.game.getRoomById(data.gameCode);
 
         if (!room) return;
 
-        const playerStore = room.getPlayerStore();
-        const djs = playerStore.getDJs()
-        const player = room.getActiveDJ();
+        const battlers = room.type === GAME_TYPE.GAME_TYPE_FREE_FOR_ALL ? room.getActivePlayers() : room.getAllPlayersByType("battler");
+        const player = room.getActivePlayer();
 
         if (!player) {
             room.setPhase("vote");
@@ -228,11 +289,10 @@ export class SocketManager {
             }, 5000);
             
         } else {
-            const track = player.selectedTrack;
+            const track = player.getSelectedTrack();
             const trackURI = track.uri;
             const albumArt = track.album.images.length > 1 ? track.album.images[1 || 0].url : "";
             room.setPhase("round-play");
-
             this.io.in(data.gameCode).emit("phase", {
                 phase: "round-play", 
                 info: {
@@ -244,24 +304,27 @@ export class SocketManager {
                     category: room.getCategory()
                 }
             });
+        }
+        
+        if (player) {
+            const nextActiveIndex = battlers.findIndex(battler => battler.id === player.id) + 1;
+            if(nextActiveIndex < battlers.length) {
 
-            const nextActiveIndex = djs.findIndex(dj => dj.id === player.id) + 1;
-            if(nextActiveIndex < djs.length) {
                 let playerFound = false;
-                for (let i = nextActiveIndex; i < djs.length; i++) {
-                    if (djs[i].selectedTrack) {
-                        room.setActiveDJ(djs[i].id);
+                for (let i = nextActiveIndex; i < battlers.length; i++) {
+                    if (battlers[i].selectedTrack) {
+                        room.setActivePlayer(battlers[i].id);
                         playerFound = true;
                         break;
                     }
                 }
 
                 if (!playerFound) {
-                    room.setActiveDJ(undefined);
+                    room.setActivePlayer(undefined);
                 }
                 
             } else {
-                room.setActiveDJ(undefined);
+                room.setActivePlayer(undefined);
             }
         } 
     }
@@ -275,20 +338,19 @@ export class SocketManager {
                 info: extra
              });
         } else {
-            this.io.in(data.gameCode).emit("phase", { phase: "wait" });
+            this.io.in(data.gameCode).emit("phase", {phase: "wait"});
         }
         
     }
 
     refreshToken(monitorId, token) {
         const id = monitorId ? (monitorId.id ? monitorId.id : monitorId) : undefined;
-        this.io.to(id).emit("token", { token });
+        this.io.to(id).emit("token", {token});
     }
 
     roundOver(data) {
         const room = this.game.getRoomById(data.gameCode);
         const winner = room.getRoundWinner();
-        console.log("winner", winner);
         const albumArt = winner.selectedTrack.album.images.length > 1 ? winner.selectedTrack.album.images[1 || 0].url : "";
         const preview = winner.selectedTrack.preview_url;
 
@@ -309,16 +371,8 @@ export class SocketManager {
     gameOver(data) {
         const room = this.game.getRoomById(data.gameCode);
         const winner = room.getGameWinner();
-
-        let albumArt, preview;
-
-        if (!!winner.previousTrack) {
-            albumArt = winner.previousTrack.album.images.length > 1 ? winner.previousTrack.album.images[1 || 0].url : "";
-            preview = winner.previousTrack.preview_url;
-        } else {
-            albumArt = winner.selectedTrack.album.images.length > 1 ? winner.selectedTrack.album.images[1 || 0].url : "";
-            preview = winner.selectedTrack.preview_url;
-        }
+        const albumArt = winner.previousTrack.album.images.length > 1 ? winner.previousTrack.album.images[1 || 0].url : "";
+        const preview = winner.previousTrack.preview_url;
 
         room.setPhase("game-over");
         this.io.in(data.gameCode).emit("phase", {

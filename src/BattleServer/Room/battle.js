@@ -1,52 +1,93 @@
-import { loadCategoryDefaults } from '../../util/helpers';
+import { loadCategoryDefaults, randomNumGen } from '../../util/helpers';
 import {Player} from '../Player';
 import * as _ from "lodash";
-import Room from './';
+import Room from '.';
 
-import { GAME_TYPE, PHASE } from '../../util/constants';
+import { GAME_TYPE, PHASE, roundDefaults } from '../../util/constants';
+import PlayerStore from '../PlayerStore';
 
 
+/**
+ * Esentially Battle Room 2.0
+ * 
+ * This should borrow from both battle and free for all game types. Ultimately, it will replace both.
+ * 
+ * Initiation should remain as-is
+ * 
+ * It should start off with default settings. There should be an option to take in settings (coming from host)
+ * and have it override the settings of the room.
+ * 
+ * These settings should dictate how the room behaves.
+ * 
+ * For anything that is timed, it should let the monitor know, and once the monitor reaches the phase,
+ * it starts the timer and once time is up, it alerts the room, which then alerts players.
+ * 
+ * The monitor should be the source of truth for all timed events, not the room.
+ * 
+ * 
+ */
 class Battle extends Room { // A room
     constructor(id, access_token, refresh_token, emitter) {
         super (id, access_token, refresh_token, emitter);
 
-        this.players = [];
-        this.activePlayers = [];
-        this.host = undefined; // id of host player
+        this.playerStore = new PlayerStore('local');
+        this.type = 'battle'
+
         this.phase = 'join';
+        this.activeDJ = undefined;
 
         this.getId.bind(this);
 
-        this.categories = loadCategoryDefaults();
         this.currentCategoryIndex = 0;
-        this.type = GAME_TYPE.GAME_TYPE_BATTLE;
 
+        const defaultCategories = loadCategoryDefaults();
+
+        this.category = defaultCategories[this.currentCategoryIndex];
+        
         this.roundNum = 1;
-        this.playDuration = .2;
-
         this.submittedCategories = [];
+
+        this.settings = {
+            playDuration: .2,
+            compNum: 2, //number of competitors
+            timeToSelect: 60, 
+            timeToVote: 15, 
+            timeToSubmitCat: 30,
+            numRounds: 3, 
+            timedSelection: true, 
+            timedVoting: true,
+            timedCats: true,
+            categorySelector: 'host', // either host or judges
+            categories: defaultCategories
+        };
+
+    }
+
+    getPlayerStore() {
+        return this.playerStore;
+    }
+
+    setSettings(settings){
+        console.log('setting game settings', settings);
+        this.settings = settings;
+        this.category = settings.categories[0];
+        this.emitter.emitEvent(this.id, 'settings update', settings);
     }
     
     getId(){
         return this.id;
     }
-    getPlayers(){
-        return this.players;
-    }
-
-    getActivePlayers() {
-        return this.activePlayers;
-    }
 
     getToken(){
         return this.spotifyToken;
     }
-    getHost(){
-        return this.host;
-    }
 
     getRoundWinner(){
-        this.players.sort( function(player1, player2) {
+
+        const players = this.playerStore.getDJs();
+        // getAllPlayers();
+
+        players.sort( function(player1, player2) {
             if(player1.roundScore > player2.roundScore) {
                 return -1;
             } else if (player1.roundScore < player2.roundScore) {
@@ -56,10 +97,13 @@ class Battle extends Room { // A room
             }
         });
 
-        return this.players[0];
+        return players[0];
     }
     getGameWinner(){
-        this.players.sort( function(player1, player2) {
+
+        const players = this.playerStore.getAllPlayers();
+
+        players.sort( function(player1, player2) {
             if(player1.gameScore > player2.gameScore) {
                 return -1;
             } else if (player1.gameScore < player2.gameScore) {
@@ -69,128 +113,34 @@ class Battle extends Room { // A room
             }
         });
 
-        return this.players[0];
+        return players[0];
     }
     getPhase(){
         return this.phase;
-    }
-
-    setHost(host){
-        const player = this.getPlayerByUsername(host);
-        this.host = player;
-        console.log('found host', player);
-        player.setType("host");
-    }
-
-    setKeeper(keeper) {
-        const player = this.getPlayerById(keeper.id);
-        player.gameState['auxKeeper'] = true;
-        player.gameState['keeper'] = true;
-        player.setType("battler");
-    }
-
-    addPlayer(id, username){
-        const player = new Player(username, id);
-        const existingPlayer = this.players.find(_player => _player.username.toLowerCase() === username.toLowerCase());
-
-        if (!existingPlayer) {
-            console.log('new', player);
-            this.players.push(player);
-            this.activePlayers.push(player);
-        } else {
-            console.log('existing', existingPlayer);
-            existingPlayer.setId(id);
-            this.activePlayers.push(existingPlayer);
-        }
-    }
-
-    removePlayer(username) {
-        this.activePlayers = this.activePlayers.filter(player => player.getUsername().toLowerCase() !== username.toLowerCase());
-    }
-
-    addToActive(player) {
-        this.activePlayers.push(player);
     }
 
     setPhase(newPhase){
         this.phase = newPhase;
     }
 
-    getPlayersByType(type){
-        return this.activePlayers.filter(player => player.type === type);
+    setActiveDJ(id){ // Player whose song is about to play
+        this.activeDJ = this.playerStore.getPlayerById(id);
     }
-
-    getAllPlayersByType(type){
-        return this.players.filter(player => player.type === type);
-    }
-
-    getPlayerById(id){
-        return this.players.find(player => player.id === id);
-    }
-
-    getPlayerByUsername(username){
-        return this.activePlayers.find(player => player.getUsername().toLowerCase() === username.toLowerCase());
-    }
-
-    getCategory(){
-        return this.categories[this.currentCategoryIndex];
-    }
-
-    nextCategory(){
-        if(this.currentCategoryIndex + 1 === this.categories.length) return undefined;
-        this.currentCategoryIndex += 1;
-        return this.getCategory();
+    getActiveDJ(){
+        const player = this.activeDJ;
+        return player;
     }
 
     getCategories(){
-        return this.categories;
+        return this.settings.categories;
     }
 
-    startGame(){
-        this.currentPlayer = this.getPlayersByType("battler");
-    }
-
-    setActivePlayer(id){ // Player whose song is about to play
-        this.activePlayer = this.getPlayerById(id);
-    }
-    getActivePlayer(){
-        const player = this.activePlayer;
-        return player;
+    getCategory(){
+        return this.category;
     }
 
     getRoundNum(){
         return this.roundNum;
-    }
-
-    nextRound(){
-        this.activePlayers.forEach(player => player.newRound());
-        const nextCat = this.nextCategory();
-        this.roundNum += 1;
-
-        if (nextCat) {
-            this.emitter.wait({gameCode: this.id}, 
-                {
-                    albumArt: undefined,
-                    artist: undefined,
-                    category: undefined,
-                    currentBattler: undefined,
-                    currentTrack: undefined,
-                    trackTitle: undefined,
-                    trackURI: undefined,
-                    winner: undefined,
-                    voting: true,
-                    preview: undefined
-                }
-            );
-            setTimeout(() => this.emitter.trackSelect({gameCode: this.id}), 5000);
-
-        } else {
-            this.emitter.gameOver({gameCode: this.id});
-        }
-    }
-
-    setCategories(categories){
-        this.categories = categories;
     }
 
     setEmitter(emitter){
@@ -198,43 +148,92 @@ class Battle extends Room { // A room
     }
 
     checkPlayerTrackEntries(){
-        const battlers = this.getPlayersByType("battler");
-        const ready = !battlers.find(battler => !battler.getSelectedTrack());
+        const djs = this.playerStore.getDJs();
+        const ready = !djs.find(dj => !dj.selectedTrack);
         if (ready) {
-            this.emitter.wait({gameCode: this.id}, {trackURI: undefined, currentTrack: undefined})
-            setTimeout(() => this.emitter.roundPlay({gameCode: this.id}), 5000);
+            this.emitter.wait({ gameCode: this.id }, { trackURI: undefined, currentTrack: undefined })
+            setTimeout(() => this.emitter.roundPlay({ gameCode: this.id }), 5000);
         }
+    }
+
+    closeVoting() {
+        this.roundOver = true;
+        this.isVotingFinished();
     }
 
     isVotingFinished(){
-        const battlers = this.getPlayersByType("battler");
+        const djs = this.playerStore.getDJs();
         let totalScore = 0;
-        battlers.forEach(battler => totalScore += battler.roundScore);
-        const roundOver = (totalScore/5) === this.activePlayers.length - battlers.length;
+        djs.forEach(dj => totalScore += dj.roundScore);
 
-        if (roundOver) {
+        if (!this.roundOver) {
+            this.roundOver = totalScore === this.playerStore.activePlayers - djs.length;
+        }
+
+        if (this.roundOver) {
             this.emitter.wait({ gameCode: this.id })
             setTimeout(() => this.emitter.roundOver({ gameCode: this.id }), 5000);
+            this.roundOver = false;
         }
     }
 
-    setPlayDuration(playDuration) {
-        this.playDuration = playDuration;
-    }
-
     getPlayDuration() {
-        return this.playDuration;
+        return this.settings.playDuration;
     }
 
     startTrackSelect(){
-        if (this.activePlayers.length === 0) return;
         this.phase = PHASE.TRACK_SELECTION_PHASE;
-        this.emitter.wait({gameCode: this.id});
-        setTimeout(() => this.emitter.trackSelect({gameCode: this.id}), 5000);
+        this.emitter.wait({ gameCode: this.id });
+        setTimeout(() => this.emitter.trackSelect({ gameCode: this.id }), 5000);
     }
 
     triggerStartGame(){
-        this.emitter.startGame(undefined, {gameCode: this.id});
+        this.emitter.startGame({ gameCode: this.id });
+    }
+
+    nextCategory(){
+        if (this.settings.categorySelector === 'judges') {
+            if (this.submittedCategories.length < 1) {
+                const defaults = loadCategoryDefaults()
+                const index = randomNumGen(defaults.length);
+                this.category = defaults[index];
+            } else {
+                const index = randomNumGen(this.submittedCategories.length);
+                this.category = this.submittedCategories[index];
+                this.submittedCategories = [];
+            }
+        } else if (this.settings.categorySelector === 'host') {
+            if(this.currentCategoryIndex + 1 === this.settings.categories.length) {
+                console.log("Category undefined", this.currentCategoryIndex);
+                console.log("categories", this.settings.categories)
+                this.category = undefined;
+            } else {
+                this.currentCategoryIndex += 1;
+                this.category = this.settings.categories[this.currentCategoryIndex];
+            }  
+        } 
+    }
+
+
+    nextRound() {
+        this.roundNum += 1;
+        this.playerStore.newRound();
+        this.nextCategory();
+        
+        this.emitter.wait({ gameCode: this.id }, roundDefaults);
+        
+        if (this.settings.categorySelector === 'judges') {
+            if (this.settings.roundNum < this.roundNum) {
+                return setTimeout(() => this.emitter.categorySubmit({ gameCode: this.id} ), 5000);
+            }
+        } else if (this.settings.categorySelector === 'host') {
+            if (this.getCategory()) {
+                return setTimeout(() => this.emitter.trackSelect({ gameCode: this.id }), 5000);
+            }
+        }
+
+        this.emitter.gameOver({ gameCode: this.id });
+
     }
 }
 

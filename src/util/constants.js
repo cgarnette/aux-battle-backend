@@ -16,6 +16,8 @@ export const GAME_TYPE_BATTLE = 'battle';
 export const GAME_TYPE_PARTY = 'party';
 export const GAME_TYPE_FREE_FOR_ALL = 'freeForAll';
 
+export const COUCH_DB_URL = process.env.COUCH_DB_URL || "http://localhost:5984";
+
 export const PHASE = {
     TRACK_SELECTION_PHASE: 'track-selection',
     CATEGORY_SUBMISSIONS_PHASE: 'category-submission',
@@ -27,4 +29,17 @@ export const GAME_TYPE = {
     GAME_TYPE_BATTLE: 'battle',
     GAME_TYPE_PARTY: 'party',
     GAME_TYPE_FREE_FOR_ALL: 'freeForAll'
+};
+
+export const roundDefaults = {
+    albumArt: undefined,
+    artist: undefined,
+    category: undefined,
+    currentBattler: undefined,
+    currentTrack: undefined,
+    trackTitle: undefined,
+    trackURI: undefined,
+    winner: undefined,
+    voting: true,
+    preview: undefined
 };

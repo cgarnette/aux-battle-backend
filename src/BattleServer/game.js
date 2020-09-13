@@ -3,11 +3,16 @@ import Battle from './Room/battle';
 import Party from './Room/party';
 import Free from './Room/free';
 import { generateRandomCode } from '../util/helpers';
+import { COUCH_DB_URL } from '../util/constants';
+
+const nano = require('nano')(COUCH_DB_URL);
 
 export class Game {
     constructor(){
         this.battleRooms = {};
         this.userRegistry = {}; //Key value pairs. Key = player.id value = roomCode
+
+       nano.db.create('BattleRooms');
     }
 
     initializeBattleRoom(access_token, refresh_token){

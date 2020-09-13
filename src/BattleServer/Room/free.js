@@ -1,4 +1,4 @@
-import Battle from './battle';
+import Battle from './battle.old';
 import { GAME_TYPE, PHASE } from '../../util/constants';
 import { randomNumGen } from '../../util/helpers';
 
@@ -81,6 +81,4 @@ export default class Free extends Battle {
         this.emitter.wait({gameCode: this.id});
         setTimeout(() => this.emitter.roundOver({ gameCode: this.id }), 5000);
     }
-
-   
 }

@@ -7,6 +7,8 @@ export class Player {
         this.id = id;
         this.username = username;
         this.gameState = {};
+        this.selectedTrack = undefined;
+        this.previousTrack = undefined;
     }
 
     newRound(){
@@ -22,18 +24,9 @@ export class Player {
     getGameState(){
         return this.gameState;
     }
-    getGameScore(){
-        return this.gameScore;
-    }
-    getRoundScore(){
-        return this.roundScore;
-    }
 
     getUsername(){
         return this.username;
-    }
-    getId(){
-        return this.id;
     }
 
     setId(id){
@@ -52,7 +45,4 @@ export class Player {
         return this.selectedTrack;
     }
 
-    addRoundPoint(){
-        this.roundScore += 1;
-    }
 }
