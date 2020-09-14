@@ -5,15 +5,13 @@ import {
 import Socket from 'socket.io';
 import express from 'express';
 import cors from 'cors';
-import request from 'request';
-import {Game} from './BattleServer/game';
-import {SocketManager} from './BattleServer/socketManager';
-import SpotifyWebApi from 'spotify-web-api-node';
+import { Game } from './BattleServer/game';
+import { SocketManager } from './BattleServer/socketManager';
 import bodyParser from 'body-parser';
-import axios from 'axios';
 const path = require('path');
 
 import spotifyRoutes from './BattleServer/Routes/spotifyRoutes';
+import battleRoutes from './BattleServer/Routes/battleRoutes';
 
 const currentGame = new Game();
 const app = express();
@@ -21,6 +19,7 @@ app.use(cors())
 app.use( bodyParser.json() ); 
 app.use(express.json());  
 app.use(spotifyRoutes);
+app.use(battleRoutes);
 
 app.get('/start', (req, res) => {
     const access = req.query.access_token;
@@ -90,5 +89,4 @@ const io = new Socket(server, {
 
 const communicationManager = new SocketManager(io, currentGame);
 
-export default app;
-export { currentGame };
+export default currentGame;

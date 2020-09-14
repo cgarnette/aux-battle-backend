@@ -1,4 +1,6 @@
-import app, { currentGame } from "../../App";
+import currentGame from "../../App";
+import express from 'express';
+const app = express();
 
 app.post('/battle/set_player_track', (req, res) => {
     const { roomCode, track, playerId } = req.body;
@@ -7,12 +9,7 @@ app.post('/battle/set_player_track', (req, res) => {
 
     playerStore.setSelectedTrack(playerId, track);
 
-    // if (room.type !== GAME_TYPE.GAME_TYPE_FREE_FOR_ALL) {
-    //   room.checkPlayerTrackEntries();  
-    // }
-
     room.checkPlayerTrackEntries();  
-    
     res.status(200).json({success: "submission successful"});
   });
 
@@ -126,3 +123,5 @@ app.post('/update/user', (req, res) => {
 
     res.status(200).send('success');
 });
+
+export default app;

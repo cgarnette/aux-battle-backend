@@ -1,4 +1,3 @@
-// import app from '../../App';
 import { 
     APPLICATION_PORT, 
     SPOTIFY_CLIENT_ID, 
@@ -8,7 +7,9 @@ import {
     PHASE,
     GAME_TYPE
 } from '../../util/constants';
+import currentGame from '../../App';
 
+import request from 'request';
 import express from 'express';
 const app = express();
 
@@ -45,7 +46,7 @@ app.get('/spotify/search', async (req, res) => {
     });
 });
 
-app.get('/spotify_login', (req, res) => {
+app.get('/spotify/login', (req, res) => {
     const scope = 'user-read-private user-read-email streaming user-read-birthdate user-read-email user-read-private';
     const redirect_uri = req.query.redirectURI ? AUX_BATTLE_CLIENT_URL + req.query.redirectURI : SPOTIFY_REDIRECT_URL;
 
@@ -58,7 +59,7 @@ app.get('/spotify_login', (req, res) => {
     '&redirect_uri=' + encodeURIComponent(redirect_uri));
 });
 
-app.get('/callback', (req, res) => {
+app.get('/spotify/callback', (req, res) => {
     const redirect_uri = req.query.redirectURI ? `${AUX_BATTLE_CLIENT_URL}${req.query.redirectURI}` : SPOTIFY_REDIRECT_URL;
     // your application requests refresh and access tokens
     // after checking the state parameter
