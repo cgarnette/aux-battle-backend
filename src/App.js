@@ -21,6 +21,11 @@ app.use(express.json());
 app.use(spotifyRoutes);
 app.use(battleRoutes);
 
+
+app.get('/', (req, res) => {
+    res.status(200).send("Ready to Connect")
+});
+
 app.get('/start', (req, res) => {
     const access = req.query.access_token;
     const refresh = req.query.refresh_token;
