@@ -1,4 +1,4 @@
-import Battle from './battle.old';
+import Battle from './battle';
 import { GAME_TYPE, PHASE } from '../../util/constants';
 import { randomNumGen } from '../../util/helpers';
 
